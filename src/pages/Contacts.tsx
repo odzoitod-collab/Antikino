@@ -50,10 +50,6 @@ export default function Contacts() {
             </p>
           </div>
         </div>
-
-        <div className="flex-1 h-64 md:h-auto min-h-[300px] bg-zinc-900 border border-zinc-800 relative overflow-hidden md:rounded-2xl">
-          <img src="https://picsum.photos/seed/map/800/600" alt="Map" className="absolute inset-0 w-full h-full object-cover opacity-50 grayscale" referrerPolicy="no-referrer" />
-        </div>
       </div>
     </div>
   );

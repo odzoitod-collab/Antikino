@@ -50,6 +50,8 @@ export default function Chat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const processedAutoSend = useRef(false);
+  const lastPollCreatedAt = useRef<string>('');
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -63,26 +65,25 @@ export default function Chat() {
     logEvent('chat_open');
   }, [logEvent]);
 
-  // Получить или создать диалог, загрузить сообщения, подписаться на Realtime
+  // Один диалог (одна ветка в ТП) на пользователя: ищем по visitor_uid, при отсутствии — создаём с текущим ref_id
   useEffect(() => {
     if (!refId || !supabase) {
       setLoading(false);
       return;
     }
 
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
     const run = async () => {
-      const { data: existing } = await supabase
+      // Сначала ищем любой существующий диалог по visitor_uid — чтобы всегда писать в ту же ветку
+      const { data: existingByVisitor } = await supabase
         .from('chat_conversations')
         .select('id')
-        .eq('ref_id', refId)
         .eq('visitor_uid', visitorUid)
+        .limit(1)
         .maybeSingle();
 
       let convId: string;
-      if (existing?.id) {
-        convId = existing.id;
+      if (existingByVisitor?.id) {
+        convId = existingByVisitor.id;
       } else {
         const { data: inserted, error } = await supabase
           .from('chat_conversations')
@@ -93,8 +94,8 @@ export default function Chat() {
           const { data: existing2 } = await supabase
             .from('chat_conversations')
             .select('id')
-            .eq('ref_id', refId)
             .eq('visitor_uid', visitorUid)
+            .limit(1)
             .maybeSingle();
           convId = existing2?.id ?? null;
         } else {
@@ -114,47 +115,42 @@ export default function Chat() {
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
-      setMessages((rows as ChatMessage[]) || []);
+      const initial = (rows as ChatMessage[]) || [];
+      setMessages(initial);
+      const last = initial.length ? initial[initial.length - 1].created_at : '';
+      lastPollCreatedAt.current = last;
 
-      channel = supabase
-        .channel(`chat:${convId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'chat_messages',
-            filter: `conversation_id=eq.${convId}`,
-          },
-          (payload) => {
-            const row = (payload.new ?? (payload as { record?: unknown }).record) as
-              | { id: string; role: string; content: string; created_at: string; image_url?: string | null }
-              | undefined;
-            if (!row || row.role !== 'support') return;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: row.id,
-                role: 'support' as const,
-                content: row.content ?? '',
-                created_at: row.created_at,
-                image_url: row.image_url ?? null,
-              },
-            ]);
-          }
-        )
-        .subscribe((status, err) => {
-          if (status === 'CHANNEL_ERROR' && err) {
-            console.warn('[Chat Realtime]', status, err);
-          }
+      const POLL_MS = 5000;
+      pollIntervalRef.current = setInterval(async () => {
+        const since = lastPollCreatedAt.current;
+        const { data: newRows } = await supabase
+          .from('chat_messages')
+          .select('id, role, content, created_at, image_url')
+          .eq('conversation_id', convId)
+          .gt('created_at', since)
+          .order('created_at', { ascending: true });
+        const list = (newRows as ChatMessage[]) || [];
+        if (list.length === 0) return;
+        setMessages((prev) => {
+          const ids = new Set(prev.map((m) => m.id));
+          const toAdd = list.filter((r) => !ids.has(r.id) && r.role === 'support');
+          if (toAdd.length === 0) return prev;
+          return [...prev, ...toAdd].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
         });
+        lastPollCreatedAt.current = list[list.length - 1].created_at;
+      }, POLL_MS);
 
       setLoading(false);
     };
 
     run();
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
     };
   }, [refId, visitorUid]);
 
@@ -292,7 +288,7 @@ export default function Chat() {
               Поддержка
               <span className="w-2 h-2 md:w-3 md:h-3 bg-pink-500 rounded-full animate-pulse" />
             </h1>
-            <p className="text-[10px] md:text-xs text-zinc-500 uppercase tracking-widest">Ответы приходят из Telegram в реальном времени</p>
+            <p className="text-[10px] md:text-xs text-zinc-500 uppercase tracking-widest">Ответы оператора подгружаются автоматически</p>
           </div>
         </div>
       </div>

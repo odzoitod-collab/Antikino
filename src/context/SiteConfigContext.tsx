@@ -9,12 +9,16 @@ import { rooms as defaultRooms, addons as defaultAddons, features } from '../con
 const REF_STORAGE_KEY = 'antick_ref_id';
 const VISITOR_UID_KEY = 'antick_visitor_uid';
 
-/** ID посетителя в памяти браузера — один на устройство, привязка к рефереру по ref_id. */
+/** Уникальный ID посетителя: один на устройство/браузер, не меняется при смене ref-ссылки и перезаходах. */
 export function getVisitorUid(): string {
-  let uid = localStorage.getItem(VISITOR_UID_KEY);
+  let uid = localStorage.getItem(VISITOR_UID_KEY) || sessionStorage.getItem(VISITOR_UID_KEY);
   if (!uid) {
     uid = crypto.randomUUID?.() ?? `v-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     localStorage.setItem(VISITOR_UID_KEY, uid);
+    sessionStorage.setItem(VISITOR_UID_KEY, uid);
+  } else {
+    if (!localStorage.getItem(VISITOR_UID_KEY)) localStorage.setItem(VISITOR_UID_KEY, uid);
+    if (!sessionStorage.getItem(VISITOR_UID_KEY)) sessionStorage.setItem(VISITOR_UID_KEY, uid);
   }
   return uid;
 }
