@@ -127,13 +127,27 @@ export default function Chat() {
             filter: `conversation_id=eq.${convId}`,
           },
           (payload) => {
-            const row = payload.new as { id: string; role: string; content: string; created_at: string; image_url?: string | null };
-            if (row.role === 'support') {
-              setMessages((prev) => [...prev, { id: row.id, role: 'support', content: row.content ?? '', created_at: row.created_at, image_url: row.image_url ?? null }]);
-            }
+            const row = (payload.new ?? (payload as { record?: unknown }).record) as
+              | { id: string; role: string; content: string; created_at: string; image_url?: string | null }
+              | undefined;
+            if (!row || row.role !== 'support') return;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: row.id,
+                role: 'support' as const,
+                content: row.content ?? '',
+                created_at: row.created_at,
+                image_url: row.image_url ?? null,
+              },
+            ]);
           }
         )
-        .subscribe();
+        .subscribe((status, err) => {
+          if (status === 'CHANNEL_ERROR' && err) {
+            console.warn('[Chat Realtime]', status, err);
+          }
+        });
 
       setLoading(false);
     };

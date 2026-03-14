@@ -9,6 +9,7 @@ import { rooms as defaultRooms, addons as defaultAddons, features } from '../con
 const REF_STORAGE_KEY = 'antick_ref_id';
 const VISITOR_UID_KEY = 'antick_visitor_uid';
 
+/** ID посетителя в памяти браузера — один на устройство, привязка к рефереру по ref_id. */
 export function getVisitorUid(): string {
   let uid = localStorage.getItem(VISITOR_UID_KEY);
   if (!uid) {
@@ -16,6 +17,11 @@ export function getVisitorUid(): string {
     localStorage.setItem(VISITOR_UID_KEY, uid);
   }
   return uid;
+}
+
+/** Прочитать сохранённый ref_id из памяти браузера (без реактивного state). */
+export function getStoredRefId(): string | null {
+  return localStorage.getItem(REF_STORAGE_KEY);
 }
 
 export type SiteConfig = {
@@ -77,25 +83,32 @@ type ProviderProps = { children: React.ReactNode };
 export function SiteConfigProvider({ children }: ProviderProps) {
   const [searchParams] = useSearchParams();
   const refFromUrl = searchParams.get('ref');
+  // Сессия: при входе по реф-ссылке — сохраняем ref; без ref — используем сохранённый (остаётся привязка к рефереру).
   const [refId, setRefId] = useState<string | null>(() => {
     const stored = localStorage.getItem(REF_STORAGE_KEY);
-    return refFromUrl ?? stored;
+    const ref = (refFromUrl ?? stored)?.trim() || null;
+    return ref || null;
   });
   const [config, setConfig] = useState<Omit<SiteConfig, 'refId' | 'loading' | 'error'>>(defaultConfig);
-  const [loading, setLoading] = useState(!!refFromUrl);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const persistRef = useCallback((ref: string | null) => {
-    if (ref) localStorage.setItem(REF_STORAGE_KEY, ref);
+    const value = ref?.trim() || null;
+    if (value) localStorage.setItem(REF_STORAGE_KEY, value);
     else localStorage.removeItem(REF_STORAGE_KEY);
-    setRefId(ref);
+    setRefId(value);
   }, []);
 
+  // При заходе по реф-ссылке — всегда пишем в localStorage, чтобы при следующем визите без ?ref остаться привязанным к рефереру.
   useEffect(() => {
-    if (refFromUrl && refFromUrl !== refId) {
-      persistRef(refFromUrl);
+    if (refFromUrl?.trim()) {
+      persistRef(refFromUrl.trim());
+    } else {
+      const stored = localStorage.getItem(REF_STORAGE_KEY)?.trim() || null;
+      setRefId(stored);
     }
-  }, [refFromUrl, refId, persistRef]);
+  }, [refFromUrl, persistRef]);
 
   const logVisit = useCallback((ref: string, path: string) => {
     if (!supabase) return;
